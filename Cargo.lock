@@ -690,6 +690,7 @@ version = "0.1.23"
 dependencies = [
  "clap",
  "criterion",
+ "memchr",
  "regex",
  "serde",
 ]

@@ -76,6 +76,7 @@ pub enum SkippableRangeType {
     Quote,
     Parentheses,
     Email,
+    ListItem,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -200,7 +201,28 @@ pub trait Language {
                 .find_iter(paragraph)
                 .map(|m| (m.start(), m.end()))
                 .collect();
-            let skippable_ranges = self.get_skippable_ranges(paragraph);
+            let mut skippable_ranges = self.get_skippable_ranges(paragraph);
+
+            // Detect list-item line starts once per paragraph and reuse the
+            // result for both atomic-item ranges (so terminator-driven boundaries
+            // inside an item are dropped) and explicit boundary emission below.
+            let list_starts = self.list_items(paragraph).unwrap_or_default();
+            if !list_starts.is_empty() {
+                for window in list_starts.windows(2) {
+                    skippable_ranges.push(SkippableRange::new(
+                        window[0],
+                        window[1],
+                        SkippableRangeType::ListItem,
+                    ));
+                }
+                let last = *list_starts.last().unwrap();
+                skippable_ranges.push(SkippableRange::new(
+                    last,
+                    paragraph.len(),
+                    SkippableRangeType::ListItem,
+                ));
+                skippable_ranges.sort_unstable_by_key(|r| r.start);
+            }
 
             'next_match: for (start, end) in matches {
                 let Some(mut boundary) = self.find_boundary(paragraph, start, end) else {
@@ -230,6 +252,20 @@ pub trait Language {
 
                 boundary = self.extend_past_orphan_closer(paragraph, boundary, &skippable_ranges);
                 push_if_increasing(&mut sentence_boundaries, boundary);
+            }
+
+            // Merge in list-item line starts as sentence boundaries. They may
+            // interleave with terminator boundaries in source order, so we
+            // sort + dedup once rather than maintain the increasing invariant
+            // during insertion.
+            if !list_starts.is_empty() {
+                for &start in &list_starts {
+                    if start > 0 {
+                        sentence_boundaries.push(start);
+                    }
+                }
+                sentence_boundaries.sort_unstable();
+                sentence_boundaries.dedup();
             }
 
             if *sentence_boundaries.last().unwrap() != paragraph.len() {
@@ -563,5 +599,19 @@ pub trait Language {
         // Sort ranges by start position for more efficient lookups
         skippable_ranges.sort_unstable_by_key(|r| r.start);
         skippable_ranges
+    }
+
+    /// Returns byte offsets of list-item line starts within `paragraph`.
+    /// Each returned offset becomes a sentence boundary, and the span between
+    /// consecutive offsets is treated as a single atomic item (terminator-driven
+    /// breaks inside an item span are dropped).
+    ///
+    /// Default impl uses the language-agnostic `detect_list_items` scanner, which
+    /// handles ASCII bullets, Unicode bullets, numeric (`1.`/`1)`), parenthesised
+    /// (`(1)`/`(a)`/`(ii)`), letter+paren (`a)`), lowercase letter+dot (`a.`),
+    /// and multi-char roman (`ii.`/`iii)`) markers. Override to add language-specific
+    /// markers (e.g. CJK enumerators) or return `None` to opt out entirely.
+    fn list_items(&self, paragraph: &str) -> Option<Vec<usize>> {
+        Some(super::list_markers::detect_list_items(paragraph))
     }
 }
