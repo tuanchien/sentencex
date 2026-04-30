@@ -1,0 +1,5 @@
+# Normalise line endings on commit; check out with LF on every platform.
+# Test fixtures are parsed by line-sensitive harnesses — CRLF would change
+# segmentation results.
+
+tests/*.txt text eol=lf
