@@ -364,3 +364,30 @@ it`s fine to leave it's foods' smells to the cat`s nose
 ---
 it`s fine to leave it's foods' smells to the cat`s nose
 ===
+Happy . . .  no one had ever before said anything about wanting him to be happy.
+---
+Happy . . .  no one had ever before said anything about wanting him to be happy.
+===
+Happy ...  no one had ever before said anything about wanting him to be happy.
+---
+Happy ...  no one had ever before said anything about wanting him to be happy.
+===
+Happy...  no one had ever before said anything about wanting him to be happy.
+---
+Happy...  no one had ever before said anything about wanting him to be happy.
+===
+Happy . . .  No one had ever before said anything about wanting him to be happy.
+---
+Happy . . .
+No one had ever before said anything about wanting him to be happy.
+===
+Happy ...  No one had ever before said anything about wanting him to be happy.
+---
+Happy ...
+No one had ever before said anything about wanting him to be happy.
+===
+Happy... No one had ever before said anything about wanting him to be happy.
+---
+Happy...
+No one had ever before said anything about wanting him to be happy.
+===

@@ -10,7 +10,16 @@ use crate::constants::QUOTES_REGEX;
 use crate::constants::QUOTE_CLOSERS_BY_LEN;
 
 static DEFAULT_SENTENCE_BREAK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    let pattern = format!("[{}]+", GLOBAL_SENTENCE_TERMINATORS.join(""));
+    // The leading `\.(?:[ \t]+\.){2,}` alternative coalesces space-separated dot
+    // runs of three or more (`. . .`, `. . . .`, ...) into one match. Two-dot
+    // forms like `. .` are intentionally excluded so a real period followed by
+    // a leading-ellipsis (`raak. ...en`) is not eaten as `. .`. `[ \t]` (not
+    // `\s`) avoids swallowing newlines and breaking paragraph splits. Leftmost
+    // -first alternation requires this branch to precede the class.
+    let pattern = format!(
+        r"\.(?:[ \t]+\.){{2,}}|[{}]+",
+        GLOBAL_SENTENCE_TERMINATORS.join("")
+    );
     Regex::new(&pattern).unwrap()
 });
 
@@ -21,6 +30,13 @@ static CONTINUE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-z]
 // check with their own month lists.
 static CONTINUE_AFTER_NONWORD_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\W*[0-9a-z]").unwrap());
+
+// Continuation rule for ellipsis matches: requires at least one whitespace char
+// between the dots and the lowercase word. `... no` is mid-sentence; `...en`
+// (no space, glued lowercase) is a leading ellipsis on the next sentence and
+// should remain a boundary.
+static ELLIPSIS_CONTINUE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s+[0-9a-z]").unwrap());
 
 static PARA_SPLIT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n[\r]*\n").unwrap());
 
@@ -447,7 +463,24 @@ pub trait Language {
     /// like abbreviations or mid-sentence punctuation.
     fn find_boundary(&self, text: &str, start: usize, end: usize) -> Option<usize> {
         let head = &text[..start];
-        let next_index = text.ceil_char_boundary(start + 1);
+        let matched = &text[start..end];
+
+        // A run of dots — adjacent (`...`) or space-separated (`. . .`) — is an
+        // ellipsis. For these, allow leading whitespace before the lowercase test,
+        // so `... no` reads as mid-sentence rather than a boundary.
+        let is_ellipsis = matched.len() > 1
+            && matched
+                .chars()
+                .all(|c| c == '.' || c == ' ' || c == '\t');
+                
+        // For any multi-char match (e.g. `...`, `!?`, `!...`), scan continuation
+        // and trailing-space extension from the end of the run, not from one byte
+        // past its first char.
+        let next_index = if matched.len() > 1 {
+            end
+        } else {
+            text.ceil_char_boundary(start + 1)
+        };
 
         let next_word_approx = self.get_next_word_approx(text, next_index);
 
@@ -457,7 +490,13 @@ pub trait Language {
             return Some(next_index + number_ref_match.end());
         }
 
-        if self.continue_in_next_word(next_word_approx) {
+        let continues = if is_ellipsis {
+            ELLIPSIS_CONTINUE_REGEX.is_match(next_word_approx)
+        } else {
+            self.continue_in_next_word(next_word_approx)
+        };
+        
+        if continues {
             return None;
         }
 
