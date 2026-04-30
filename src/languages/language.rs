@@ -24,6 +24,15 @@ static CONTINUE_AFTER_NONWORD_REGEX: LazyLock<Regex> =
 
 static PARA_SPLIT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n[\r]*\n").unwrap());
 
+/// Push `boundary` only if it advances past the last recorded position.
+/// Quote-extension can move a boundary past later regex matches in the same
+/// paragraph; this keeps the boundary list strictly increasing.
+fn push_if_increasing(boundaries: &mut Vec<usize>, boundary: usize) {
+    if boundary > *boundaries.last().unwrap() {
+        boundaries.push(boundary);
+    }
+}
+
 /// Shared helper for languages that continue sentences before month names.
 ///
 /// Returns `true` if `text` starts with a lowercase letter/digit (after optional
@@ -192,45 +201,50 @@ pub trait Language {
                 .collect();
             let skippable_ranges = self.get_skippable_ranges(paragraph);
 
-            for (start, end) in matches {
-                let mut boundary = self
-                    .find_boundary(paragraph, start, end)
-                    .unwrap_or(usize::MAX);
-
-                if boundary == usize::MAX {
+            'next_match: for (start, end) in matches {
+                let Some(mut boundary) = self.find_boundary(paragraph, start, end) else {
                     continue;
-                }
-
-                let mut in_range = false;
+                };
 
                 for range in &skippable_ranges {
-                    if range.contains(boundary) {
+                    if !range.contains(boundary) {
+                        continue;
+                    }
+
+                    // Inside a quoted/parens/email range. Either advance past the
+                    // closer (if the boundary sits at an inner terminator) or drop
+                    // this match entirely. Either way, no further extension applies.
+                    if range.is_inner_terminator(paragraph, boundary) {
                         let next_word = self.get_next_word_approx(paragraph, range.end);
-                        let boundary_extend = self.get_boundary_extend(next_word);
-                        if range.is_inner_terminator(paragraph, boundary)
-                            && boundary_extend >= 0
-                        {
-                            boundary = range.end + boundary_extend as usize;
-                            in_range = false;
-                        } else {
-                            in_range = true;
+                        let extend = self.get_boundary_extend(next_word);
+                        if extend >= 0 {
+                            push_if_increasing(
+                                &mut sentence_boundaries,
+                                range.end + extend as usize,
+                            );
                         }
-                        break;
+                    }
+                    continue 'next_match;
+                }
+
+                // Not inside any range — pull an orphan trailing quote closer
+                // (e.g. `.'` with no matching opener) into the previous sentence.
+                // Skip when the next char is the opener of a known quoted range:
+                // that quote belongs to the upcoming sentence.
+                let at_known_opener = skippable_ranges.iter().any(|r| r.start == boundary);
+                if !at_known_opener {
+                    if let Some(closer) = QUOTE_CLOSERS_BY_LEN
+                        .iter()
+                        .find(|c| paragraph[boundary..].starts_with(**c))
+                    {
+                        let after = boundary + closer.len();
+                        boundary = crate::constants::SPACE_AFTER_SEPARATOR
+                            .find(&paragraph[after..])
+                            .map_or(after, |m| after + m.end());
                     }
                 }
 
-                if in_range {
-                    continue;
-                }
-
-                // Quote-extension can move a boundary past later regex matches in the
-                // same paragraph. Ignore those stale matches so boundaries stay
-                // strictly increasing instead of slicing backwards later.
-                if boundary <= *sentence_boundaries.last().unwrap() {
-                    continue;
-                }
-
-                sentence_boundaries.push(boundary);
+                push_if_increasing(&mut sentence_boundaries, boundary);
             }
 
             if *sentence_boundaries.last().unwrap() != paragraph.len() {
