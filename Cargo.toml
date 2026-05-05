@@ -32,6 +32,10 @@ harness = false
 name = "list_markers_bench"
 harness = false
 
+[[bench]]
+name = "abbreviation_lookup_bench"
+harness = false
+
 [workspace]
 members = [
     "bindings/python",

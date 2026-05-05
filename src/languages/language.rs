@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use crate::SentenceBoundary;
@@ -435,8 +436,9 @@ pub trait Language {
     /// For example, "Dr." or "etc." should not trigger a sentence boundary.
     /// Languages should override this to provide their specific abbreviation lists.
     /// Returns an empty slice by default.
-    fn get_abbreviations(&self) -> &[String] {
-        &[]
+    fn get_abbreviations(&self) -> &HashSet<String> {
+        static EMPTY_ABBREVS: LazyLock<HashSet<String>> = LazyLock::new(HashSet::new);
+        &EMPTY_ABBREVS
     }
 
     /// Determines how many characters to extend a boundary when continuing into the next word.
@@ -553,11 +555,10 @@ pub trait Language {
         }
 
         let abbreviations = self.get_abbreviations();
-        let is_abbrev = abbreviations.contains(&last_word.to_string());
-        let is_abbrev_lower = abbreviations.contains(&last_word.to_lowercase());
-        let is_abbrev_upper = abbreviations.contains(&last_word.to_uppercase());
-
-        is_abbrev || is_abbrev_lower || is_abbrev_upper
+        
+        abbreviations.contains(last_word)
+            || abbreviations.contains(last_word.to_lowercase().as_str())
+            || abbreviations.contains(last_word.to_uppercase().as_str())
     }
 
     /// Extracts the last word from the given text by splitting on whitespace and periods.

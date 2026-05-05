@@ -1,10 +1,11 @@
 use super::Language;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone)]
 pub struct Punjabi {}
 
-static ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
+static ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
     include_str!("./abbrev/pa.txt")
         .lines()
         .chain(include_str!("./abbrev/en.txt").lines())
@@ -13,7 +14,7 @@ static ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
         .collect()
 });
 impl Language for Punjabi {
-    fn get_abbreviations(&self) -> &[String] {
+    fn get_abbreviations(&self) -> &HashSet<String> {
         &ABBREVIATIONS
     }
 }

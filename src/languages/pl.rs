@@ -1,10 +1,11 @@
 use super::Language;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone)]
 pub struct Polish {}
 
-static ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
+static ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
     include_str!("./abbrev/pl.txt")
         .lines()
         .map(|line| line.trim().to_string())
@@ -12,7 +13,7 @@ static ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
         .collect()
 });
 impl Language for Polish {
-    fn get_abbreviations(&self) -> &[String] {
+    fn get_abbreviations(&self) -> &HashSet<String> {
         &ABBREVIATIONS
     }
 }

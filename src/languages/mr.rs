@@ -1,10 +1,12 @@
+use std::collections::HashSet;
+
 use super::{Hindi, Language};
 
 #[derive(Debug, Clone)]
 pub struct Marathi {}
 
 impl Language for Marathi {
-    fn get_abbreviations(&self) -> &[String] {
+    fn get_abbreviations(&self) -> &HashSet<String> {
         Hindi {}.get_abbreviations()
     }
 }

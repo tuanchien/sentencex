@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -15,7 +16,7 @@ static BURMESE_SENTENCE_BREAK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 impl Language for Burmese {
-    fn get_abbreviations(&self) -> &[String] {
+    fn get_abbreviations(&self) -> &HashSet<String> {
         English {}.get_abbreviations()
     }
 

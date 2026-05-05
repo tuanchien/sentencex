@@ -1,10 +1,11 @@
 use super::Language;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone)]
 pub struct English {}
 
-static ENGLISH_ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
+static ENGLISH_ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
     include_str!("./abbrev/en.txt")
         .lines()
         .map(|line| line.trim().to_string())
@@ -13,7 +14,7 @@ static ENGLISH_ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
 });
 
 impl Language for English {
-    fn get_abbreviations(&self) -> &[String] {
+    fn get_abbreviations(&self) -> &HashSet<String> {
         &ENGLISH_ABBREVIATIONS
     }
 }

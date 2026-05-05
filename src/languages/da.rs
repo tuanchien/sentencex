@@ -1,11 +1,12 @@
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use super::Language;
 
 #[derive(Debug, Clone)]
 pub struct Danish {}
-static DANISH_ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
+static DANISH_ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
     include_str!("./abbrev/da.txt")
         .lines()
         .map(|line| line.trim().to_string())
@@ -14,7 +15,7 @@ static DANISH_ABBREVIATIONS: LazyLock<Vec<String>> = LazyLock::new(|| {
 });
 
 impl Language for Danish {
-    fn get_abbreviations(&self) -> &[String] {
+    fn get_abbreviations(&self) -> &HashSet<String> {
         &DANISH_ABBREVIATIONS
     }
 
