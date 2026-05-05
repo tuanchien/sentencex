@@ -672,7 +672,31 @@ pub trait Language {
             return None;
         }
 
-        if self.is_abbreviation(head, next_word_approx, &text[start..end]) {
+        // Post-positional time abbreviations (a.m./p.m.) take no argument, so a
+        // digit-led or capital-led next token starts a new clock reading or a
+        // new sentence - unlike reference-taking abbrevs (p./Vol./No./Jan.)
+        // where digit-after is the abbreviation's argument and continues the
+        // clause. Without this carve-out, the trailing "m" case-folds to the
+        // title-initial "M." in the abbrev list and the boundary is suppressed.
+        // Lowercase next is intentionally not bypassed: `7 a.m. is before ...`
+        // should stay one sentence via the abbreviation path.
+        const TIME_ABBREV_SUFFIXES: &[&str] = &["a.m", "p.m", "A.M", "P.M"];
+        let head_trimmed = head.trim_end();
+        let next_starts_new_clause = {
+            let mut chars = next_word_approx.trim_start().chars();
+            match chars.next() {
+                Some(c) if c.is_ascii_digit() => true,
+                Some(c) if c.is_uppercase() => chars.next().is_some_and(|c2| c2.is_lowercase()),
+                _ => false,
+            }
+        };
+        let bypass_abbrev = matched == "."
+            && next_starts_new_clause
+            && TIME_ABBREV_SUFFIXES
+                .iter()
+                .any(|s| head_trimmed.ends_with(s));
+
+        if !bypass_abbrev && self.is_abbreviation(head, next_word_approx, &text[start..end]) {
             return None;
         }
 

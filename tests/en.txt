@@ -477,3 +477,24 @@ Kate Owen looked at him and said quietly, `And what do you remember next?'  ' I 
 Kate Owen looked at him and said quietly, `And what do you remember next?' 
 ' I was in bed, in the infirmary, with bandages.'
 ===
+Cleveland has four trains per day , Train 48 departs Cleveland at 7a.m . All the others run in the middle of the night .
+---
+Cleveland has four trains per day , Train 48 departs Cleveland at 7a.m .
+All the others run in the middle of the night .
+===
+7 a.m. is before 7 p.m. 7 a.m. is before dinner. 7 a.m. is before p. 753
+---
+7 a.m. is before 7 p.m.
+7 a.m. is before dinner.
+7 a.m. is before p. 753
+===
+ At 11:58 p.m. PDT on October 1 , the Las Vegas Metropolitan Police Department stated that one suspect , a Nevada resident , was '' down '' . Police stated that no other shooters were believed to be involved .
+---
+ At 11:58 p.m. PDT on October 1 , the Las Vegas Metropolitan Police Department stated that one suspect , a Nevada resident , was '' down '' .
+ Police stated that no other shooters were believed to be involved .
+===
+ At 11:58 p.m. P.D.T. on October 1 , the Las Vegas Metropolitan Police Department stated that one suspect , a Nevada resident , was '' down '' . Police stated that no other shooters were believed to be involved .
+---
+ At 11:58 p.m. P.D.T. on October 1 , the Las Vegas Metropolitan Police Department stated that one suspect , a Nevada resident , was '' down '' .
+ Police stated that no other shooters were believed to be involved .
+===
