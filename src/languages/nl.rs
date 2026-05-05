@@ -2,17 +2,13 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use super::Language;
+use super::parse_word_list;
 
 #[derive(Debug, Clone)]
 pub struct Dutch {}
 
-static DUTCH_ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    include_str!("./abbrev/nl.txt")
-        .lines()
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.starts_with("//") && !line.is_empty())
-        .collect()
-});
+static DUTCH_ABBREVIATIONS: LazyLock<HashSet<String>> =
+    LazyLock::new(|| parse_word_list([include_str!("./abbrev/nl.txt")]));
 impl Language for Dutch {
     fn get_abbreviations(&self) -> &HashSet<String> {
         &DUTCH_ABBREVIATIONS

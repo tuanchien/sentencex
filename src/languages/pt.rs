@@ -1,17 +1,13 @@
 use crate::constants::ROMAN_NUMERALS;
 
 use super::Language;
+use super::parse_word_list;
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
 static ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    let mut abbreviations: HashSet<String> = include_str!("./abbrev/pt.txt")
-        .lines()
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.starts_with("//") && !line.is_empty())
-        .collect();
-
+    let mut abbreviations = parse_word_list([include_str!("./abbrev/pt.txt")]);
     abbreviations.extend(ROMAN_NUMERALS.iter().map(|&s| s.to_string()));
     abbreviations.extend(ROMAN_NUMERALS.iter().map(|&s| s.to_uppercase()));
     abbreviations

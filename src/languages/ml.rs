@@ -2,16 +2,15 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use super::Language;
+use super::parse_word_list;
 
 #[derive(Debug, Clone)]
 pub struct Malayalam {}
 static MALAYALAM_ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    include_str!("./abbrev/ml.txt")
-        .lines()
-        .chain(include_str!("./abbrev/en.txt").lines())
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.starts_with("//") && !line.is_empty())
-        .collect()
+    parse_word_list([
+        include_str!("./abbrev/ml.txt"),
+        include_str!("./abbrev/en.txt"),
+    ])
 });
 
 impl Language for Malayalam {

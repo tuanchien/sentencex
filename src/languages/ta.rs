@@ -2,34 +2,29 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use super::Language;
+use super::parse_word_list;
 
 #[derive(Debug, Clone)]
 pub struct Tamil {}
 static TAMIL_ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    let vowel_signs = vec!["ா", "ி", "ீ", "ু", "ূ", "ে", "ে", "ৈ", "ও", "ো", "ৌ"];
-    let vowels = vec!["அ", "ஆ", "இ", "ஈ", "உ", "ஊ", "எ", "ஏ", "ஐ", "ஒ", "ஓ", "ஔ"];
-    let consonants = vec![
+    let vowel_signs = ["ா", "ி", "ீ", "ু", "ূ", "ে", "ে", "ৈ", "ও", "ো", "ৌ"];
+    let vowels = ["அ", "ஆ", "இ", "ஈ", "உ", "ஊ", "எ", "ஏ", "ஐ", "ஒ", "ஓ", "ஔ"];
+    let consonants = [
         "க", "ங", "ச", "ஞ", "ட", "ண", "த", "ந", "ப", "ம", "ய", "ர", "ல", "வ", "ழ", "ள", "ற", "ன",
     ];
 
-    let mut consonant_vowels = Vec::new();
+    let mut abbreviations = parse_word_list([
+        include_str!("./abbrev/ta.txt"),
+        include_str!("./abbrev/en.txt"),
+    ]);
+    abbreviations.extend(vowels.iter().map(|&s| s.to_string()));
+    abbreviations.extend(consonants.iter().map(|&s| s.to_string()));
     for consonant in &consonants {
         for vowel_sign in &vowel_signs {
-            consonant_vowels.push(format!("{}{}", consonant, vowel_sign));
+            abbreviations.insert(format!("{}{}", consonant, vowel_sign));
         }
     }
-
-    include_str!("./abbrev/ta.txt")
-        .lines()
-        .chain(include_str!("./abbrev/en.txt").lines())
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.starts_with("//") && !line.is_empty())
-        .collect::<Vec<String>>()
-        .into_iter()
-        .chain(vowels.into_iter().map(String::from))
-        .chain(consonants.into_iter().map(String::from))
-        .chain(consonant_vowels)
-        .collect()
+    abbreviations
 });
 
 impl Language for Tamil {
