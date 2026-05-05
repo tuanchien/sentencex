@@ -1,21 +1,24 @@
 use super::Language;
+use super::parse_word_list;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone)]
 pub struct English {}
 
-static ENGLISH_ABBREVIATIONS: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    include_str!("./abbrev/en.txt")
-        .lines()
-        .map(|line| line.trim().to_string())
-        .filter(|line| !line.starts_with("//") && !line.is_empty())
-        .collect()
-});
+static ENGLISH_ABBREVIATIONS: LazyLock<HashSet<String>> =
+    LazyLock::new(|| parse_word_list([include_str!("./abbrev/en.txt")]));
+
+static ENGLISH_SENTENCE_STARTERS: LazyLock<HashSet<String>> =
+    LazyLock::new(|| parse_word_list([include_str!("./starters/en.txt")]));
 
 impl Language for English {
     fn get_abbreviations(&self) -> &HashSet<String> {
         &ENGLISH_ABBREVIATIONS
+    }
+
+    fn get_sentence_starters(&self) -> &HashSet<String> {
+        &ENGLISH_SENTENCE_STARTERS
     }
 }
 

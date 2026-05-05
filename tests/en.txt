@@ -199,10 +199,30 @@ She works at Yahoo! in the accounting department.
 ---
 She works at Yahoo! in the accounting department.
 ===
-#We make a good team, you and I. Did you see Albert I. Jones yesterday?
-#---
-#We make a good team, you and I.
-#Did you see Albert I. Jones yesterday?
+We make a good team, you and I. Did you see Albert I. Jones yesterday?
+---
+We make a good team, you and I.
+Did you see Albert I. Jones yesterday?
+===
+She agreed with him and I. We left.
+---
+She agreed with him and I.
+We left.
+===
+J. R. R. Tolkien wrote it. He was English.
+---
+J. R. R. Tolkien wrote it.
+He was English.
+===
+George W. Bush spoke. The crowd cheered.
+---
+George W. Bush spoke.
+The crowd cheered.
+===
+He left. Albert went home.
+---
+He left.
+Albert went home.
 ===
 Thoreau argues that by simplifying one's life, "the laws of the universe will appear less complex. . . ."
 ---

@@ -69,6 +69,23 @@ fn push_if_increasing(boundaries: &mut Vec<usize>, boundary: usize) {
     }
 }
 
+/// True iff `s` is a single ASCII uppercase letter. Used to recognise name
+/// initials and gate the structural / starter override.
+fn is_single_ascii_upper(s: &str) -> bool {
+    s.len() == 1 && s.as_bytes()[0].is_ascii_uppercase()
+}
+
+/// True iff `s` (after leading whitespace) begins with a name-initial token:
+/// a single uppercase ASCII letter, a `.`, then end-of-string or whitespace.
+/// `J. R. Tolkien` triggers; `Jones`, `J.R.R.`, and `A.B` do not.
+fn starts_with_initial(s: &str) -> bool {
+    let mut chars = s.trim_start().chars();
+    let Some(first) = chars.next() else { return false };
+    first.is_ascii_uppercase()
+        && chars.next() == Some('.')
+        && chars.next().is_none_or(char::is_whitespace)
+}
+
 /// Find all terminator-run matches in `text`, then fold a stray spaced `.`
 /// onto any preceding `!`/`?`/`…` run so inputs like `Bravo ! .` don't
 /// surface an orphan one-char sentence. The regex already coalesces
@@ -440,6 +457,18 @@ pub trait Language {
         &EMPTY_ABBREVS
     }
 
+    /// Returns a list of common sentence-opener words for this language.
+    /// Used as a one-way override: when the abbreviation or name-initial path
+    /// would suppress a boundary but the next word is a known sentence opener
+    /// (e.g. "The", "He", "Did"), the boundary is forced back on.
+    /// Restrict the list to function words and auxiliaries that almost never
+    /// appear capitalized mid-sentence; never include proper nouns. Returns an
+    /// empty set by default - languages opt in by overriding.
+    fn get_sentence_starters(&self) -> &HashSet<String> {
+        static EMPTY_STARTERS: LazyLock<HashSet<String>> = LazyLock::new(HashSet::new);
+        &EMPTY_STARTERS
+    }
+
     /// Determines how many characters to extend a boundary when continuing into the next word.
     /// Returns -1 if the word indicates the boundary should not be created (continuation case).
     /// Returns 0 or positive number indicating how many whitespace/punctuation characters
@@ -557,6 +586,68 @@ pub trait Language {
         abbreviations.contains(last_word)
             || abbreviations.contains(last_word.to_lowercase().as_str())
             || abbreviations.contains(last_word.to_uppercase().as_str())
+    }
+
+    /// Detects a name initial: a single uppercase ASCII letter followed by a
+    /// period in a position that looks like part of a name. Returns true when
+    /// the immediately preceding token in `head` starts with an uppercase
+    /// ASCII letter (`Albert I.`, `George W.`) or the immediately following
+    /// token is itself an initial (`J. R. R. Tolkien`, including the
+    /// sentence-initial position where there is no preceding token).
+    ///
+    /// Conservative: ASCII-only on both sides, so non-Latin scripts are
+    /// unaffected. Caller is expected to gate this on the matched terminator
+    /// being a single `.` and on `last_word` being a single uppercase letter;
+    /// the helper re-checks the latter so it is safe to call standalone.
+    fn is_name_initial(&self, head: &str, next_word_approx: &str) -> bool {
+        let last_word = self.get_last_word(head);
+
+        if !is_single_ascii_upper(last_word) {
+            return false;
+        }
+
+        // Preceding-token rule: trim the initial and any separators
+        // get_last_word splits on (whitespace, `.`, `/`), then take the
+        // trailing word of what's left.
+        let prefix = head[..head.len() - last_word.len()]
+            .trim_end_matches(|c: char| c.is_whitespace() || c == '.' || c == '/');
+            
+        let prev_token = self.get_last_word(prefix);
+        if prev_token
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase())
+        {
+            return true;
+        }
+
+        // Chained-initial rule: the next token is itself an initial.
+        starts_with_initial(next_word_approx)
+    }
+
+    /// Returns true if the next non-space token in `next_word_approx` is a
+    /// known sentence-opener for this language. Used as a one-way override
+    /// when the abbreviation or name-initial path would otherwise suppress a
+    /// boundary - a function-word opener (`The`, `He`, `Did`, ...) strongly
+    /// signals the start of a new sentence.
+    fn next_word_is_sentence_starter(&self, next_word_approx: &str) -> bool {
+        let starters = self.get_sentence_starters();
+        if starters.is_empty() {
+            return false;
+        }
+        let trimmed = next_word_approx.trim_start();
+        // Stop at whitespace, any sentence terminator (covers `.`, `!`, `?`,
+        // `…`, and the ~150 Unicode terminators across scripts), or a comma -
+        // the most likely trailing punctuation immediately after a starter
+        // word (`I. Did, however, ...`).
+        let word_end = trimmed
+            .find(|c: char| {
+                c.is_whitespace()
+                    || c == ','
+                    || crate::constants::GLOBAL_SENTENCE_TERMINATORS_SET.contains(&c)
+            })
+            .unwrap_or(trimmed.len());
+        word_end > 0 && starters.contains(&trimmed[..word_end])
     }
 
     /// Extracts the last word from the given text by splitting on whitespace and periods.
@@ -695,7 +786,30 @@ pub trait Language {
                 .iter()
                 .any(|s| head_trimmed.ends_with(s));
 
-        if !bypass_abbrev && self.is_abbreviation(head, next_word_approx, &text[start..end]) {
+        if matched == "." {
+            // Hybrid: structural name-initial detection plus the abbreviation
+            // table both feed one suppression decision. The starter override
+            // is scoped to single-uppercase-letter last words - the only
+            // ambiguity it is meant to rescue (pronoun "I." vs. name
+            // initial). Multi-letter abbreviations (`etc.`, `Mr.`) and
+            // lowercase list markers (`a.`, `ii.`) keep their suppression
+            // unchanged.
+            let last_word = self.get_last_word(head);
+            let is_initial_letter = is_single_ascii_upper(last_word);
+
+            let suppress = (is_initial_letter && self.is_name_initial(head, next_word_approx))
+                || (!bypass_abbrev
+                    && self.is_abbreviation(head, next_word_approx, &text[start..end]));
+
+            let starter_overrides_suppress =
+                is_initial_letter && self.next_word_is_sentence_starter(next_word_approx);
+
+            if suppress && !starter_overrides_suppress {
+                return None;
+            }
+        } else if !bypass_abbrev
+            && self.is_abbreviation(head, next_word_approx, &text[start..end])
+        {
             return None;
         }
 
