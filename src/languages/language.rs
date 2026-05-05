@@ -818,12 +818,28 @@ pub trait Language {
             let last_word = self.get_last_word(head);
             let is_initial_letter = is_single_ascii_upper(last_word);
 
+            // Proper-noun shape: capitalized multi-letter token (first
+            // upper, contains a lowercase letter). Catches surnames like
+            // "Penn" that match a state abbreviation case-insensitively.
+            // All-uppercase ("USA") and lowercase ("etc") keep their
+            // original suppression behavior.
+            let last_word_is_capitalized_name = {
+                let mut chars = last_word.chars();
+                match chars.next() {
+                    Some(c) if c.is_ascii_uppercase() => {
+                        chars.any(|c| c.is_ascii_lowercase())
+                    }
+                    _ => false,
+                }
+            };
+
             let suppress = !bypass_abbrev
                 && ((is_initial_letter && self.is_name_initial(head, next_word_approx))
                     || self.is_abbreviation(head, next_word_approx, &text[start..end]));
 
-            let starter_overrides_suppress =
-                is_initial_letter && self.next_word_is_sentence_starter(next_word_approx);
+            let starter_overrides_suppress = (is_initial_letter
+                || last_word_is_capitalized_name)
+                && self.next_word_is_sentence_starter(next_word_approx);
 
             if suppress && !starter_overrides_suppress {
                 return None;
