@@ -47,6 +47,8 @@ ct
 d.phil
 D
 dak
+dc
+d.c
 dec
 del
 dept
@@ -63,6 +65,7 @@ ens
 esp
 esq
 etc
+exec
 exp
 expy
 ext
@@ -73,6 +76,7 @@ ff
 f.f
 fig
 fla
+fr
 ft
 fwy
 fy
@@ -111,6 +115,13 @@ ken
 ky
 L
 la
+ll
+llb
+ll.b
+ll.d
+lld
+llm
+ll.m
 loc
 lt
 ltd
@@ -176,7 +187,10 @@ ph.d
 ph
 pl
 plz
+pg
+p.g
 pp
+pres
 prof
 ps
 p.s
