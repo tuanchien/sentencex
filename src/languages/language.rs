@@ -6,6 +6,7 @@ use crate::SentenceBoundary;
 use crate::constants::EMAIL_REGEX;
 use crate::constants::EXCLAMATION_WORDS;
 use crate::constants::GLOBAL_SENTENCE_TERMINATORS;
+use crate::constants::GLOBAL_SENTENCE_TERMINATORS_SET;
 use crate::constants::PARENS_REGEX;
 use crate::constants::QUOTE_CLOSERS_BY_LEN;
 use crate::constants::QUOTE_PAIRS;
@@ -361,11 +362,9 @@ pub trait Language {
                     trimmed_slice
                         .char_indices()
                         .next_back()
-                        .and_then(|(idx, _)| {
-                            // Extract the last character from the trimmed slice
-                            let char_str = &trimmed_slice[idx..];
-                            if GLOBAL_SENTENCE_TERMINATORS.contains(&char_str) {
-                                Some(char_str.to_string())
+                        .and_then(|(idx, ch)| {
+                            if GLOBAL_SENTENCE_TERMINATORS_SET.contains(&ch) {
+                                Some(trimmed_slice[idx..].to_string())
                             } else {
                                 None
                             }
@@ -454,8 +453,7 @@ pub trait Language {
 
         let mut count = 0i8;
         for ch in word.chars() {
-            if ch.is_whitespace() || GLOBAL_SENTENCE_TERMINATORS.contains(&ch.to_string().as_str())
-            {
+            if ch.is_whitespace() || GLOBAL_SENTENCE_TERMINATORS_SET.contains(&ch) {
                 count += 1;
                 if count == i8::MAX {
                     break; // Prevent overflow

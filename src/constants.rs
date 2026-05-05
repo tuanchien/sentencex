@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 pub const ROMAN_NUMERALS: [&str; 20] = [
@@ -327,6 +328,13 @@ pub const GLOBAL_SENTENCE_TERMINATORS: [&str; 155] = [
     "。", // U+3002 IDEOGRAPHIC FULL STOP
     "｡",  // U+FF61 HALFWIDTH IDEOGRAPHIC FULL STOP
 ];
+
+pub static GLOBAL_SENTENCE_TERMINATORS_SET: LazyLock<HashSet<char>> = LazyLock::new(|| {
+    GLOBAL_SENTENCE_TERMINATORS
+        .iter()
+        .map(|s| s.chars().next().expect("terminator entry must be a single char"))
+        .collect()
+});
 
 #[cfg(test)]
 mod tests {
