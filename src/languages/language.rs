@@ -86,6 +86,23 @@ fn starts_with_initial(s: &str) -> bool {
         && chars.next().is_none_or(char::is_whitespace)
 }
 
+/// True when the time phrase ending at `head` is "fronted" - the preposition
+/// introducing the time literal starts with an uppercase letter, so the time
+/// phrase opens a sentence (`At 5 a.m.`, `By 9:00 P.M.`) rather than closing
+/// one (`he left at 6 p.m.`). Caller must already have established that
+/// `head` ends in a 3-char time-abbrev suffix (`a.m`/`p.m`, any case).
+fn time_phrase_is_fronted(head: &str) -> bool {
+    let after_suffix = head[..head.len() - 3].trim_end();
+    let after_num = after_suffix
+        .trim_end_matches(|c: char| c.is_ascii_digit() || c == ':')
+        .trim_end();
+    after_num
+        .rsplit(char::is_whitespace)
+        .next()
+        .and_then(|w| w.chars().next())
+        .is_some_and(|c| c.is_ascii_uppercase())
+}
+
 /// Find all terminator-run matches in `text`, then fold a stray spaced `.`
 /// onto any preceding `!`/`?`/`…` run so inputs like `Bravo ! .` don't
 /// surface an orphan one-char sentence. The regex already coalesces
@@ -762,29 +779,33 @@ pub trait Language {
             return None;
         }
 
-        // Post-positional time abbreviations (a.m./p.m.) take no argument, so a
-        // digit-led or capital-led next token starts a new clock reading or a
-        // new sentence - unlike reference-taking abbrevs (p./Vol./No./Jan.)
-        // where digit-after is the abbreviation's argument and continues the
-        // clause. Without this carve-out, the trailing "m" case-folds to the
-        // title-initial "M." in the abbrev list and the boundary is suppressed.
-        // Lowercase next is intentionally not bypassed: `7 a.m. is before ...`
-        // should stay one sentence via the abbreviation path.
-        const TIME_ABBREV_SUFFIXES: &[&str] = &["a.m", "p.m", "A.M", "P.M"];
+        // Bypass abbrev/name-initial suppression after `a.m./p.m.` (any case)
+        // when the follower starts a new clock reading (digit) or a new
+        // sentence (capital with a lowercase introducing preposition like
+        // `at 6 p.m. Mr.`). Fronted `At 5 a.m. Mr.` keeps the suppression so
+        // the time phrase reads as adverbial.
         let head_trimmed = head.trim_end();
-        let next_starts_new_clause = {
-            let mut chars = next_word_approx.trim_start().chars();
-            match chars.next() {
-                Some(c) if c.is_ascii_digit() => true,
-                Some(c) if c.is_uppercase() => chars.next().is_some_and(|c2| c2.is_lowercase()),
+        let ends_with_time_abbrev = {
+            let mut it = head_trimmed.bytes().rev();
+            match (it.next(), it.next(), it.next()) {
+                (Some(c2), Some(b'.'), Some(c0)) => {
+                    matches!(c0.to_ascii_lowercase(), b'a' | b'p')
+                        && c2.to_ascii_lowercase() == b'm'
+                }
                 _ => false,
             }
         };
+        
         let bypass_abbrev = matched == "."
-            && next_starts_new_clause
-            && TIME_ABBREV_SUFFIXES
-                .iter()
-                .any(|s| head_trimmed.ends_with(s));
+            && ends_with_time_abbrev
+            && {
+                let mut chars = next_word_approx.trim_start().chars();
+                match chars.next() {
+                    Some(c) if c.is_ascii_digit() => true,
+                    Some(c) if c.is_uppercase() => !time_phrase_is_fronted(head_trimmed),
+                    _ => false,
+                }
+            };
 
         if matched == "." {
             // Hybrid: structural name-initial detection plus the abbreviation
@@ -797,9 +818,9 @@ pub trait Language {
             let last_word = self.get_last_word(head);
             let is_initial_letter = is_single_ascii_upper(last_word);
 
-            let suppress = (is_initial_letter && self.is_name_initial(head, next_word_approx))
-                || (!bypass_abbrev
-                    && self.is_abbreviation(head, next_word_approx, &text[start..end]));
+            let suppress = !bypass_abbrev
+                && ((is_initial_letter && self.is_name_initial(head, next_word_approx))
+                    || self.is_abbreviation(head, next_word_approx, &text[start..end]));
 
             let starter_overrides_suppress =
                 is_initial_letter && self.next_word_is_sentence_starter(next_word_approx);

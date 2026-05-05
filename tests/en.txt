@@ -518,3 +518,15 @@ All the others run in the middle of the night .
  At 11:58 p.m. P.D.T. on October 1 , the Las Vegas Metropolitan Police Department stated that one suspect , a Nevada resident , was '' down '' .
  Police stated that no other shooters were believed to be involved .
 ===
+At 5 a.m. Mr. Smith went to the bank. He left the bank at 6 P.M. Mr. Smith then went to the store.
+---
+At 5 a.m. Mr. Smith went to the bank.
+He left the bank at 6 P.M.
+Mr. Smith then went to the store.
+===
+At 5 a.m. Mr. Smith went to the bank. He left the bank at 6 p.m. Mr. Smith then went to the store.
+---
+At 5 a.m. Mr. Smith went to the bank.
+He left the bank at 6 p.m.
+Mr. Smith then went to the store.
+===
