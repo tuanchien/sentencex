@@ -875,47 +875,33 @@ pub trait Language {
                 }
             };
 
-        if matched == "." {
-            // Hybrid: structural name-initial detection plus the abbreviation
-            // table both feed one suppression decision. The starter override
-            // is scoped to single-uppercase-letter last words - the only
-            // ambiguity it is meant to rescue (pronoun "I." vs. name
-            // initial). Multi-letter abbreviations (`etc.`, `Mr.`) and
-            // lowercase list markers (`a.`, `ii.`) keep their suppression
-            // unchanged.
-            let last_word = self.get_last_word(head);
-            let is_initial_letter = is_single_ascii_upper(last_word);
+        if !bypass_abbrev {
+            if matched == "." {
+                // A last word starting with an uppercase letter, followed by
+                // a registered sentence starter, overrides abbreviation /
+                // name-initial suppression. Covers single initials ("I."),
+                // Capitalized names ("Penn."), and all-caps acronyms
+                // ("BART."). Lowercase tokens ("etc.", "p.m.", "ii.", "a.")
+                // are excluded and keep their suppression. Internal periods
+                // of "U.S.A." chains are safe: the next token ("S", "A") is
+                // not in the starter list.
+                let last_word = self.get_last_word(head);
+                let starter_override = last_word
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase())
+                    && self.next_word_is_sentence_starter(next_word_approx);
 
-            // Proper-noun shape: capitalized multi-letter token (first
-            // upper, contains a lowercase letter). Catches surnames like
-            // "Penn" that match a state abbreviation case-insensitively.
-            // All-uppercase ("USA") and lowercase ("etc") keep their
-            // original suppression behavior.
-            let last_word_is_capitalized_name = {
-                let mut chars = last_word.chars();
-                match chars.next() {
-                    Some(c) if c.is_ascii_uppercase() => {
-                        chars.any(|c| c.is_ascii_lowercase())
-                    }
-                    _ => false,
+                if !starter_override
+                    && ((is_single_ascii_upper(last_word)
+                        && self.is_name_initial(head, next_word_approx))
+                        || self.is_abbreviation(head, next_word_approx, &text[start..end]))
+                {
+                    return None;
                 }
-            };
-
-            let suppress = !bypass_abbrev
-                && ((is_initial_letter && self.is_name_initial(head, next_word_approx))
-                    || self.is_abbreviation(head, next_word_approx, &text[start..end]));
-
-            let starter_overrides_suppress = (is_initial_letter
-                || last_word_is_capitalized_name)
-                && self.next_word_is_sentence_starter(next_word_approx);
-
-            if suppress && !starter_overrides_suppress {
+            } else if self.is_abbreviation(head, next_word_approx, &text[start..end]) {
                 return None;
             }
-        } else if !bypass_abbrev
-            && self.is_abbreviation(head, next_word_approx, &text[start..end])
-        {
-            return None;
         }
 
         if self.is_exclamation(head, next_word_approx) {
