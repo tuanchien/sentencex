@@ -126,6 +126,22 @@ fn is_symmetric_quote_range(text: &str, range: &SkippableRange) -> bool {
         .any(|p| span.len() >= 2 * p.open.len() && span.starts_with(p.open) && span.ends_with(p.close))
 }
 
+/// True when the paragraph contains an odd number of the symmetric quote
+/// token that opens `range`. An odd count guarantees at least one orphan
+/// occurrence — and when that orphan sits earlier than a real downstream
+/// opener, `QUOTES_REGEX` will mispair across a real sentence break. Even
+/// counts are structurally consistent and should be trusted.
+fn symmetric_token_count_is_odd(paragraph: &str, range: &SkippableRange) -> bool {
+    let Some(pair) = QUOTE_PAIRS
+        .iter()
+        .filter(|p| p.open == p.close)
+        .find(|p| paragraph[range.start..].starts_with(p.open))
+    else {
+        return false;
+    };
+    paragraph.matches(pair.open).count() % 2 == 1
+}
+
 /// True when `quote` and any parens range in `ranges` partially overlap —
 /// one endpoint inside, the other outside. Full containment in either
 /// direction (a quote wrapping parens, or parens wrapping a quote) is fine
@@ -423,7 +439,9 @@ pub trait Language {
                     // endpoints straddle a parens boundary — and let the
                     // boundary through instead of vetoing it.
                     if is_symmetric_quote_range(paragraph, range)
-                        && quote_partially_overlaps_parens(range, &skippable_ranges)
+                        && (quote_partially_overlaps_parens(range, &skippable_ranges)
+                            || (symmetric_token_count_is_odd(paragraph, range)
+                                && self.has_strong_sentence_break(paragraph, start, end)))
                     {
                         continue;
                     }
@@ -630,6 +648,41 @@ pub trait Language {
             return boundary;
         };
 
+        // A symmetric closer (`''`, `'`, `"`, …) that is whitespace-separated
+        // from the terminator and followed by a capitalized word is far more
+        // likely the *opener* of the next sentence than a trailing orphan of
+        // the current one. Only apply this when there are no unconsumed
+        // occurrences of the same token before `boundary` — i.e. we hit the
+        // `before == 0 && at_or_after == 1` branch in `is_orphan_closer`. The
+        // odd-unmatched-opener case (`before > 0`) is a real trailing closer
+        // and must keep its current behaviour.
+        // A symmetric closer (`''`, `'`, `"`, …) that follows a terminator+space
+        // and precedes whitespace + a capitalized word is more plausibly the
+        // *opener* of the next sentence than a trailing orphan — but only when
+        // the same token has already been used as a paired opener/closer
+        // earlier in the paragraph. That paired use is the signal that the
+        // text is using this token in opener position too; without it, the
+        // token is more likely a stray closer (e.g. `… do ? ''` with no
+        // earlier opener).
+        if is_symmetric_quote_closer(closer) {
+            let has_earlier_symmetric_pair = skippable_ranges.iter().any(|r| {
+                r.end <= boundary
+                    && is_symmetric_quote_range(paragraph, r)
+                    && paragraph[r.start..].starts_with(*closer)
+            });
+            if has_earlier_symmetric_pair {
+                let after = &paragraph[boundary + closer.len()..];
+                let mut chars = after.chars();
+                let first = chars.next();
+                if first.is_some_and(char::is_whitespace) {
+                    let next_non_ws = chars.find(|c| !c.is_whitespace());
+                    if next_non_ws.is_some_and(|c| c.is_ascii_uppercase()) {
+                        return boundary;
+                    }
+                }
+            }
+        }
+
         // Pull the boundary past the closer, then mop up trailing whitespace
         // and any stranded terminators (`'' .`) that would otherwise form a
         // single-punctuation sentence on their own.
@@ -789,6 +842,46 @@ pub trait Language {
             .next()
             .is_some_and(|c| c.is_ascii_uppercase());
         tail_starts_uppercase || self.is_multi_dot_abbreviation(head, last_word.len())
+    }
+
+    /// True when the terminator at `[start, end)` looks like a confident
+    /// sentence end: a single `.` whose preceding word is plain (not an
+    /// abbreviation, not a single-letter initial) and whose follower starts
+    /// with a registered sentence-starter word. Used as a structural escape
+    /// valve for symmetric-pair quote ranges (`''…''`, `'…'`, `"…"`) that the
+    /// non-greedy `QUOTES_REGEX` may have mispaired across a real boundary.
+    fn has_strong_sentence_break(&self, paragraph: &str, start: usize, end: usize) -> bool {
+        if &paragraph[start..end] != "." {
+            return false;
+        }
+        let head = &paragraph[..start];
+        let last_word = self.get_last_word(head);
+        if last_word.is_empty() || is_single_ascii_upper(last_word) {
+            return false;
+        }
+        if self.is_abbreviation(head, last_word, ".")
+            || self.is_multi_dot_abbreviation(head, last_word.len())
+        {
+            return false;
+        }
+        let next_index = paragraph.ceil_char_boundary(start + 1);
+        let next_word_approx = self.get_next_word_approx(paragraph, next_index);
+        // `closer + . + UpperWord` (e.g. `'' . Lead`) is a structurally strong
+        // sentence break: a symmetric quote closer immediately before a
+        // terminator marks the end of a quoted sentence, and a capitalized
+        // follower starts the next. Accept it without requiring a registered
+        // starter word — the starter list can't enumerate every proper noun.
+        if is_symmetric_quote_closer(last_word) {
+            let trimmed = next_word_approx.trim_start();
+            if trimmed
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+            {
+                return true;
+            }
+        }
+        self.next_word_is_sentence_starter(next_word_approx)
     }
 
     /// True when `head`'s trailing token is a multi-dot abbreviation listed

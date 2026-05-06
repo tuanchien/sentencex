@@ -33,6 +33,7 @@ By
 Can
 Cannot
 Clearly
+Coincidentally
 Consequently
 Conversely
 Could
