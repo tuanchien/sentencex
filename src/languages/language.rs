@@ -824,10 +824,16 @@ pub trait Language {
     /// - The trailing letter is uppercase. Covers single initials (`I.`),
     ///   capitalized names (`Penn.`), and all-caps acronyms (`BART.`).
     /// - The full trailing token is a known multi-dot abbreviation
-    ///   (`w.e.f`). Lowercase plain tails (`etc.`, `ii.`, `a.`) keep
-    ///   their suppression. Time-abbrev cases (`p.m.`, `a.m.`) never reach
-    ///   this branch — they bypass abbreviation handling earlier via
-    ///   `bypass_abbrev`.
+    ///   (`w.e.f.`).
+    /// - The trailing token is a lowercase multi-character entry that
+    ///   appears verbatim in the abbreviations list (`etc.`, `feat.`,
+    ///   `man.`). Single-letter lowercase tails (`a.`, `i.`) are
+    ///   excluded — those only match the abbreviations list via
+    ///   case-folding to a single-letter capital abbreviation, and they
+    ///   commonly occur as inline list markers.
+    ///
+    /// Time-abbrev cases (`p.m.`, `a.m.`) never reach this branch — they
+    /// bypass abbreviation handling earlier via `bypass_abbrev`.
     fn should_override_abbrev_suppression(
         &self,
         head: &str,
@@ -841,7 +847,13 @@ pub trait Language {
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_uppercase());
-        tail_starts_uppercase || self.is_multi_dot_abbreviation(head, last_word.len())
+        if tail_starts_uppercase {
+            return true;
+        }
+        if self.is_multi_dot_abbreviation(head, last_word.len()) {
+            return true;
+        }
+        last_word.chars().count() > 1 && self.get_abbreviations().contains(last_word)
     }
 
     /// True when the terminator at `[start, end)` looks like a confident
