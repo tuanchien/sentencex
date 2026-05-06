@@ -655,19 +655,13 @@ pub trait Language {
     /// Returns true if this appears to be an abbreviation (and thus not a sentence boundary),
     /// false if it's likely a genuine sentence end. Used to prevent breaking sentences
     /// at abbreviations like "Dr. Smith" or "etc."
-    fn is_abbreviation(&self, head: &str, _tail: &str, separator: &str) -> bool {
-        if self.get_abbreviation_char() != separator {
-            return false;
-        }
-
-        let last_word = self.get_last_word(head);
-
-        if last_word.is_empty() {
+    fn is_abbreviation(&self, _head: &str, last_word: &str, separator: &str) -> bool {
+        if self.get_abbreviation_char() != separator || last_word.is_empty() {
             return false;
         }
 
         let abbreviations = self.get_abbreviations();
-        
+
         abbreviations.contains(last_word)
             || abbreviations.contains(last_word.to_lowercase().as_str())
             || abbreviations.contains(last_word.to_uppercase().as_str())
@@ -684,9 +678,7 @@ pub trait Language {
     /// unaffected. Caller is expected to gate this on the matched terminator
     /// being a single `.` and on `last_word` being a single uppercase letter;
     /// the helper re-checks the latter so it is safe to call standalone.
-    fn is_name_initial(&self, head: &str, next_word_approx: &str) -> bool {
-        let last_word = self.get_last_word(head);
-
+    fn is_name_initial(&self, head: &str, last_word: &str, next_word_approx: &str) -> bool {
         if !is_single_ascii_upper(last_word) {
             return false;
         }
@@ -754,6 +746,67 @@ pub trait Language {
             Some((i, c)) => &trimmed[i + c.len_utf8()..],
             None => trimmed,
         }
+    }
+
+    /// Like `get_last_word`, but keeps internal `.`s so multi-dot
+    /// abbreviations (`w.e.f`, `U.S`, `p.m`) are returned whole. Splits only
+    /// on whitespace and `/`. Used by abbreviation lookup so the full token
+    /// can be matched against the abbreviation table.
+    fn get_last_word_full<'a>(&self, text: &'a str) -> &'a str {
+        let trimmed = text.trim_end();
+        match trimmed
+            .char_indices()
+            .rfind(|(_, c)| c.is_whitespace() || *c == '/')
+        {
+            Some((i, c)) => &trimmed[i + c.len_utf8()..],
+            None => trimmed,
+        }
+    }
+
+    /// One-way override that lets `find_boundary` keep a sentence boundary
+    /// even when the abbreviation / name-initial path would otherwise
+    /// suppress it. Fires when the next word is a registered sentence
+    /// starter and one of the following holds:
+    ///
+    /// - The trailing letter is uppercase. Covers single initials (`I.`),
+    ///   capitalized names (`Penn.`), and all-caps acronyms (`BART.`).
+    /// - The full trailing token is a known multi-dot abbreviation
+    ///   (`w.e.f`). Lowercase plain tails (`etc.`, `ii.`, `a.`) keep
+    ///   their suppression. Time-abbrev cases (`p.m.`, `a.m.`) never reach
+    ///   this branch — they bypass abbreviation handling earlier via
+    ///   `bypass_abbrev`.
+    fn should_override_abbrev_suppression(
+        &self,
+        head: &str,
+        last_word: &str,
+        next_word_approx: &str,
+    ) -> bool {
+        if !self.next_word_is_sentence_starter(next_word_approx) {
+            return false;
+        }
+        let tail_starts_uppercase = last_word
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase());
+        tail_starts_uppercase || self.is_multi_dot_abbreviation(head, last_word.len())
+    }
+
+    /// True when `head`'s trailing token is a multi-dot abbreviation listed
+    /// in this language's abbreviation table (`w.e.f`, `U.S.`, ...). The
+    /// full dotted token is used for the lookup, not just the post-`.` tail
+    /// `get_last_word` returns. `tail_len = get_last_word(head).len()`
+    /// serves as an O(1) "the full token contains a `.`" check: when the
+    /// full token is no longer than the tail there is no internal dot and
+    /// the lookup is skipped along with its case-folding allocations.
+    fn is_multi_dot_abbreviation(&self, head: &str, tail_len: usize) -> bool {
+        let last_word_full = self.get_last_word_full(head);
+        if last_word_full.len() <= tail_len {
+            return false;
+        }
+        let abbrevs = self.get_abbreviations();
+        abbrevs.contains(last_word_full)
+            || abbrevs.contains(last_word_full.to_lowercase().as_str())
+            || abbrevs.contains(last_word_full.to_uppercase().as_str())
     }
 
     /// Checks if a potential sentence boundary is actually an exclamation word that shouldn't
@@ -876,30 +929,22 @@ pub trait Language {
             };
 
         if !bypass_abbrev {
+            let last_word = self.get_last_word(head);
             if matched == "." {
-                // A last word starting with an uppercase letter, followed by
-                // a registered sentence starter, overrides abbreviation /
-                // name-initial suppression. Covers single initials ("I."),
-                // Capitalized names ("Penn."), and all-caps acronyms
-                // ("BART."). Lowercase tokens ("etc.", "p.m.", "ii.", "a.")
-                // are excluded and keep their suppression. Internal periods
-                // of "U.S.A." chains are safe: the next token ("S", "A") is
-                // not in the starter list.
-                let last_word = self.get_last_word(head);
-                let starter_override = last_word
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_ascii_uppercase())
-                    && self.next_word_is_sentence_starter(next_word_approx);
+                let suppressed = (is_single_ascii_upper(last_word)
+                    && self.is_name_initial(head, last_word, next_word_approx))
+                    || self.is_abbreviation(head, last_word, &text[start..end]);
 
-                if !starter_override
-                    && ((is_single_ascii_upper(last_word)
-                        && self.is_name_initial(head, next_word_approx))
-                        || self.is_abbreviation(head, next_word_approx, &text[start..end]))
+                if suppressed
+                    && !self.should_override_abbrev_suppression(
+                        head,
+                        last_word,
+                        next_word_approx,
+                    )
                 {
                     return None;
                 }
-            } else if self.is_abbreviation(head, next_word_approx, &text[start..end]) {
+            } else if self.is_abbreviation(head, last_word, &text[start..end]) {
                 return None;
             }
         }
