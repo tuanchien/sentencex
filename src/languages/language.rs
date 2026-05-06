@@ -200,6 +200,35 @@ fn time_phrase_is_fronted(head: &str) -> bool {
         .is_some_and(|c| c.is_ascii_uppercase())
 }
 
+/// True when `text` — the slice immediately after an orphan `!`/`?` — looks
+/// like a mid-sentence continuation rather than a new sentence.
+///
+/// Three named steps:
+///   1. trim leading whitespace,
+///   2. optionally peel off one symmetric-quote token (`'`, `''`, `"`, `` ` ``,
+///      ` `` `, `‚`, `‛`, `‟`) and the whitespace that follows — covers cases
+///      like `! '' and …` where an odd count of `''` leaves a stray closer
+///      between the terminator and the real continuation,
+///   3. peek the next char: lowercase-ASCII or digit means continuation.
+///
+/// Step 2 reuses [`QUOTE_PAIRS`] (filtered to symmetric pairs where opener and
+/// closer are the same token) so the set of quote tokens stays in sync with
+/// the rest of the segmenter — no hand-maintained ASCII list.
+fn continuation_after_orphan_quote(text: &str) -> bool {
+    let after_ws = text.trim_start();
+    let after_quote = QUOTE_PAIRS
+        .iter()
+        .filter(|p| p.open == p.close)
+        .find_map(|p| after_ws.strip_prefix(p.close))
+        .map(str::trim_start)
+        .unwrap_or(after_ws);
+
+    after_quote
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+}
+
 /// Find all terminator-run matches in `text`, then fold a stray spaced `.`
 /// onto any preceding `!`/`?`/`…` run so inputs like `Bravo ! .` don't
 /// surface an orphan one-char sentence. The regex already coalesces
@@ -985,6 +1014,21 @@ pub trait Language {
         };
 
         if continues {
+            return None;
+        }
+
+        // Orphan emphatic terminator: a single free-standing `!` or `?` with
+        // whitespace on both sides followed by a lowercase/digit word is a
+        // title-embedded literal, not a sentence end (e.g. the 1963 film
+        // "Father Came Too !" in `Father Came Too ! is a British comedy film`).
+        // Skips a single intervening symmetric-quote token (`'`, `''`, `"`,
+        // `` ` ``, ` `` `) so `... All Grown Up ! '' and adult voices ...` —
+        // where odd-count `''` tokens leave a stray closer between the `!` and
+        // the real continuation — is also recognised. Single-byte equality on
+        // `matched` implicitly excludes multi-char runs, ellipses, and `.`.
+        let is_orphan_emphatic = (matched == "!" || matched == "?")
+            && matches!(head.chars().next_back(), Some(' ' | '\t'));
+        if is_orphan_emphatic && continuation_after_orphan_quote(next_word_approx) {
             return None;
         }
 
