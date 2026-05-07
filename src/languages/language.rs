@@ -60,6 +60,14 @@ static ELLIPSIS_GLUED_CONTINUE_REGEX: LazyLock<Regex> =
 
 static PARA_SPLIT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n[\r]*\n").unwrap());
 
+// Inline sentence-break signature inside a candidate `'…'` quote span: a `.`
+// or `!` followed by `[ \t]+` and an ASCII uppercase letter. `?` is excluded
+// because quoted utterances ending in `?` commonly continue the surrounding
+// sentence (`… boy? ' he said, …`); that case is handled separately by
+// `continuation_after_orphan_quote`.
+static INLINE_SENTENCE_BREAK_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[.!][ \t]+[A-Z]").unwrap());
+
 /// True when `closer` is the closing token of a symmetric quote pair —
 /// `'`, `''`, `"`, etc., where opener equals closer. These pairs are
 /// inherently ambiguous: `QUOTES_REGEX` can fail to pair them when they're
@@ -88,17 +96,13 @@ fn is_orphan_closer(
         return true;
     }
 
-    let consumed_by_asymmetric_pair = |idx: usize| {
-        skippable_ranges
-            .iter()
-            .any(|r| r.is_quote() && idx >= r.start && idx < r.end)
-    };
-
     let (mut before, mut at_or_after) = (0usize, 0usize);
     for (idx, _) in paragraph.match_indices(closer) {
-        if consumed_by_asymmetric_pair(idx) {
+        if is_in_quote_range(skippable_ranges, idx) || is_contraction_quote(paragraph, idx, closer)
+        {
             continue;
         }
+
         if idx < boundary {
             before += 1;
         } else {
@@ -155,6 +159,101 @@ fn quote_partially_overlaps_parens(quote: &SkippableRange, ranges: &[SkippableRa
             (quote.start < p.start && p.start < quote.end && quote.end < p.end)
                 || (p.start < quote.start && quote.start < p.end && p.end < quote.end)
         })
+}
+
+/// True when `idx` lies inside an existing quote `SkippableRange`.
+fn is_in_quote_range(ranges: &[SkippableRange], idx: usize) -> bool {
+    ranges
+        .iter()
+        .any(|r| r.is_quote() && idx >= r.start && idx < r.end)
+}
+
+/// Append `'…'` / `` `…` `` ranges that `QUOTES_REGEX` couldn't pair. The
+/// guarded patterns require a `\b` immediately after the opener, so
+/// space-padded openers like `' word ` go unpaired even when they form a
+/// real `' … '` pair — the shape that `''(?s:.*?)''` matches natively for
+/// unguarded `''`. Without this, replacing `''` with `'` in identical text
+/// changes segmentation; with it, the two behave the same.
+///
+/// Algorithm: for each guarded symmetric token, collect candidate positions
+/// (skipping contractions and tokens already inside a quote range), then
+/// walk consecutive pairs. Pair an opener-shape position with its immediate
+/// neighbour unless the candidate closer is itself opener-like — followed
+/// by whitespace + uppercase, suggesting it is opening another utterance
+/// rather than closing this one — AND the intervening span contains an
+/// inline `[.!] + ws + uppercase` sentence break. That combined signal
+/// distinguishes back-to-back utterances (`' utt1. ' Utt2 '`, where the
+/// middle `'` is a fresh opener) from a single multi-sentence quotation
+/// (`' s1. s2. ' he said`, where the closing `'` is followed by narrative).
+fn append_space_padded_quote_pairs(text: &str, ranges: &mut Vec<SkippableRange>) {
+    for pair in QUOTE_PAIRS.iter().filter(|p| p.guard && p.open == p.close) {
+        let token = pair.close;
+        let positions: Vec<usize> = text
+            .match_indices(token)
+            .map(|(idx, _)| idx)
+            .filter(|&idx| {
+                !is_in_quote_range(ranges, idx) && !is_contraction_quote(text, idx, token)
+            })
+            .collect();
+
+        let mut candidates = positions.iter().copied().peekable();
+        while let Some(opener) = candidates.next() {
+            let Some(&closer) = candidates.peek() else { break };
+            let span = &text[opener + token.len()..closer];
+            if is_opener_shape(text, opener, token)
+                && !(starts_new_utterance(text, closer + token.len())
+                    && INLINE_SENTENCE_BREAK_REGEX.is_match(span))
+            {
+                ranges.push(SkippableRange::new(
+                    opener,
+                    closer + token.len(),
+                    SkippableRangeType::Quote,
+                ));
+                candidates.next();
+            }
+        }
+    }
+}
+
+/// True when `text[from..]` starts with whitespace followed by an ASCII
+/// uppercase letter — the signature of a fresh utterance/sentence opening.
+fn starts_new_utterance(text: &str, from: usize) -> bool {
+    text[from..]
+        .trim_start_matches(|c: char| c == ' ' || c == '\t')
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase())
+        && text[from..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+}
+
+/// True when the `token` occurrence at `idx` is a contraction (`wasn't`,
+/// `o'clock`) — sandwiched between two alphanumerics. Such `'` are not
+/// quote characters; counting them flips the parity-based orphan check.
+fn is_contraction_quote(text: &str, idx: usize, token: &str) -> bool {
+    let prev_word = text[..idx]
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_alphanumeric());
+
+    let next_word = text[idx + token.len()..]
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_alphanumeric());
+    prev_word && next_word
+}
+
+/// True when the `'` (or `` ` ``) at `idx` is preceded by start-of-text or
+/// whitespace AND followed by whitespace — the shape `QUOTES_REGEX`'s
+/// guarded pattern can't pair (it requires `\b` after the opener). The
+/// fallback pairer in `get_skippable_ranges` keys on this shape.
+fn is_opener_shape(text: &str, idx: usize, token: &str) -> bool {
+    let prev = text[..idx].chars().next_back();
+    let next = text[idx + token.len()..].chars().next();
+    (prev.is_none() || prev.is_some_and(char::is_whitespace))
+        && next.is_some_and(char::is_whitespace)
 }
 
 /// Push `boundary` only if it advances past the last recorded position.
@@ -1017,18 +1116,19 @@ pub trait Language {
             return None;
         }
 
-        // Orphan emphatic terminator: a single free-standing `!` or `?` with
-        // whitespace on both sides followed by a lowercase/digit word is a
-        // title-embedded literal, not a sentence end (e.g. the 1963 film
-        // "Father Came Too !" in `Father Came Too ! is a British comedy film`).
-        // Skips a single intervening symmetric-quote token (`'`, `''`, `"`,
-        // `` ` ``, ` `` `) so `... All Grown Up ! '' and adult voices ...` —
-        // where odd-count `''` tokens leave a stray closer between the `!` and
-        // the real continuation — is also recognised. Single-byte equality on
-        // `matched` implicitly excludes multi-char runs, ellipses, and `.`.
-        let is_orphan_emphatic = (matched == "!" || matched == "?")
-            && matches!(head.chars().next_back(), Some(' ' | '\t'));
-        if is_orphan_emphatic && continuation_after_orphan_quote(next_word_approx) {
+        // Emphatic `!`/`?` followed (optionally through a symmetric-quote
+        // token like `'`, `''`, `"`) by a lowercase/digit word is a
+        // mid-sentence continuation, not a sentence end. Covers two shapes:
+        //   * free-standing terminator: `Father Came Too ! is a British …`
+        //     and `... All Grown Up ! '' and adult voices ...` (orphan `''`
+        //     between the `!` and the real continuation).
+        //   * glued terminator inside a closing quote: `… eh, boy? ' he said,
+        //     …` where `?` ends a quoted utterance but the surrounding
+        //     sentence continues with a lowercase reporting clause.
+        // Single-byte equality on `matched` implicitly excludes multi-char
+        // runs, ellipses, and `.`.
+        let is_emphatic = matched == "!" || matched == "?";
+        if is_emphatic && continuation_after_orphan_quote(next_word_approx) {
             return None;
         }
 
@@ -1136,29 +1236,18 @@ pub trait Language {
         let estimated_ranges = (text.len() / 200).max(1);
         let mut skippable_ranges = Vec::with_capacity(estimated_ranges);
 
-        for mat in QUOTES_REGEX.find_iter(text) {
-            skippable_ranges.push(SkippableRange::new(
-                mat.start(),
-                mat.end(),
-                SkippableRangeType::Quote,
-            ));
-        }
+        let push_regex_ranges = |regex: &Regex,
+                                 kind: SkippableRangeType,
+                                 out: &mut Vec<SkippableRange>| {
+            for mat in regex.find_iter(text) {
+                out.push(SkippableRange::new(mat.start(), mat.end(), kind));
+            }
+        };
 
-        for mat in PARENS_REGEX.find_iter(text) {
-            skippable_ranges.push(SkippableRange::new(
-                mat.start(),
-                mat.end(),
-                SkippableRangeType::Parentheses,
-            ));
-        }
-
-        for mat in EMAIL_REGEX.find_iter(text) {
-            skippable_ranges.push(SkippableRange::new(
-                mat.start(),
-                mat.end(),
-                SkippableRangeType::Email,
-            ));
-        }
+        push_regex_ranges(&QUOTES_REGEX, SkippableRangeType::Quote, &mut skippable_ranges);
+        append_space_padded_quote_pairs(text, &mut skippable_ranges);
+        push_regex_ranges(&PARENS_REGEX, SkippableRangeType::Parentheses, &mut skippable_ranges);
+        push_regex_ranges(&EMAIL_REGEX, SkippableRangeType::Email, &mut skippable_ranges);
 
         // Sort ranges by start position for more efficient lookups
         skippable_ranges.sort_unstable_by_key(|r| r.start);
