@@ -328,34 +328,36 @@ fn continuation_after_orphan_quote(text: &str) -> bool {
         .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }
 
-/// Find all terminator-run matches in `text`, then fold a stray spaced `.`
-/// onto any preceding `!`/`?`/`…` run so inputs like `Bravo ! .` don't
-/// surface an orphan one-char sentence. The regex already coalesces
-/// homogeneous runs (`! !`, `? ? ?`, `. . .`); the mixed case can't be
+/// Find all terminator-run matches in `text`, then fold a follow-up
+/// dot-only match onto any preceding `!`/`?`/`…` run so inputs like
+/// `Bravo ! .` and `Happy! . . . no one …` surface as a single coalesced
+/// terminator. The regex already coalesces homogeneous runs (`! !`,
+/// `? ? ?`, `. . .`); mixed `!` + `.` (single or spaced) can't be
 /// expressed without lookahead because `[!?…][ \t]+\.` would also eat the
-/// first dot of an ellipsis (`! ...`). Restricting the merge to a single
-/// trailing dot sidesteps that.
+/// first dot of an ellipsis (`! ...`). Folding only matches that consist
+/// entirely of `.` characters (with the gap whitespace-only) sidesteps
+/// that — `! ...` is matched by the contiguous-class branch as `!...`
+/// and reaches this point as one match, while `! . . .` arrives as `!`
+/// + `. . .` and needs the fold.
 fn find_terminator_matches(text: &str, regex: &Regex) -> Vec<(usize, usize)> {
-    let bytes = text.as_bytes();
     let mut out: Vec<(usize, usize)> = Vec::new();
-    
+
     for m in regex.find_iter(text) {
         let (start, end) = (m.start(), m.end());
 
         if let Some(last) = out.last_mut() {
-            // Order: cheap & rare-true predicates first. `last_emphatic`
-            // is only true when the previous match ended in `!`/`?`/`…`,
-            // which is uncommon - short-circuit on it before walking the
-            // gap or doing slice work.
-            let last_emphatic = text[last.0..last.1].ends_with(['!', '?', '…']);
-            
-            if last_emphatic && end - start == 1 && bytes[start] == b'.' {
-                let gap = &bytes[last.1..start];
+            let prev = &text[last.0..last.1];
+            let candidate = &text[start..end];
+            let gap = &text[last.1..start];
 
-                if !gap.is_empty() && gap.iter().all(|&b| b == b' ' || b == b'\t') {
-                    last.1 = end;
-                    continue;
-                }
+            let is_blank = |c: char| matches!(c, ' ' | '\t');
+            let prev_is_emphatic = prev.ends_with(['!', '?', '…']);
+            let candidate_is_dot_run = candidate.starts_with('.') && candidate.chars().all(|c| c == '.' || is_blank(c));
+            let separated_by_blanks = !gap.is_empty() && gap.chars().all(is_blank);
+
+            if prev_is_emphatic && candidate_is_dot_run && separated_by_blanks {
+                last.1 = end;
+                continue;
             }
         }
 
